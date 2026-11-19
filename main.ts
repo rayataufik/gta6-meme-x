@@ -10,7 +10,7 @@
 // Local run, the way the grader does it:
 //   mkdir -p out && MAKEFUN_BOT_DIR=. MAKEFUN_OUTPUT_DIR=out node main.ts
 
-import { copyFileSync, mkdirSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 // In the grader's container the repository is mounted at /bot and the
@@ -21,9 +21,33 @@ const OUTPUT_DIR = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
 
 mkdirSync(OUTPUT_DIR, { recursive: true });
 
+// Read POST.json, check it really names an X post, and only then hand it
+// on. The gate refuses a POST.json that does not name a post's address,
+// so a bad file should fail here with a clear message instead of being
+// copied through and refused later. The bytes written out are the file's
+// own bytes, unchanged, so the two runs still write identical output.
+const POST_PATH = join(BOT_DIR, 'POST.json');
+let postText: string;
 try {
-  copyFileSync(join(BOT_DIR, 'POST.json'), join(OUTPUT_DIR, 'POST.json'));
+  postText = readFileSync(POST_PATH, 'utf8');
 } catch (err) {
-  console.error(`could not copy POST.json from ${BOT_DIR}: ${(err as Error).message}`);
+  console.error(`could not read POST.json from ${BOT_DIR}: ${(err as Error).message}`);
   process.exit(1);
 }
+
+let post: unknown;
+try {
+  post = JSON.parse(postText);
+} catch (err) {
+  console.error(`POST.json is not valid JSON: ${(err as Error).message}`);
+  process.exit(1);
+}
+
+const url = (post as { url?: unknown } | null)?.url;
+const X_POST = /^https:\/\/(www\.|mobile\.)?(x\.com|twitter\.com)\/[^/]+\/status\/\d+$/;
+if (typeof url !== 'string' || !X_POST.test(url)) {
+  console.error(`POST.json does not name an X post address: ${JSON.stringify(post)}`);
+  process.exit(1);
+}
+
+writeFileSync(join(OUTPUT_DIR, 'POST.json'), postText);
